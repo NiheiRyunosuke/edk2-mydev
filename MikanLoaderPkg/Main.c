@@ -153,7 +153,7 @@ EFI_STATUS EFIAPI UefiMain(
       AllocateAddress, EfiLoaderData,
       (kernel_file_size + 0xfff) / 0x1000, &kernel_base_addr);
 
-  // ★修正ポイント：読み込みサイズを確実にセットして実行する
+  // ★修正ポイント：読み込みサイズを確実にセットして実行
   UINTN read_size = kernel_file_size;
   status = kernel_file->Read(kernel_file, &read_size, (VOID*)kernel_base_addr);
   Print(L"Kernel: 0x%0lx (%lu / %lu bytes read)\n", kernel_base_addr, read_size, kernel_file_size);
