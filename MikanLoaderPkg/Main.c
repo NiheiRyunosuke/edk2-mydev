@@ -108,6 +108,10 @@ EFI_STATUS OpenRootDir(EFI_HANDLE image_handle, EFI_FILE_PROTOCOL** root) {
   return EFI_SUCCESS;
 }
 
+void Halt(void){
+  while (1) __asm__("hlt");
+}
+
 EFI_STATUS EFIAPI UefiMain(
     EFI_HANDLE image_handle,
     EFI_SYSTEM_TABLE* system_table) {
@@ -149,9 +153,13 @@ EFI_STATUS EFIAPI UefiMain(
   UINTN kernel_file_size = file_info->FileSize;
 
   EFI_PHYSICAL_ADDRESS kernel_base_addr = 0x100000;
-  gBS->AllocatePages(
+  status = gBS->AllocatePages(
       AllocateAddress, EfiLoaderData,
       (kernel_file_size + 0xfff) / 0x1000, &kernel_base_addr);
+  if (EFI_ERROR(status)){
+    Print(L"failed to allocate pages: %r\n", status);
+    Halt();
+  }
 
   // ★修正ポイント：読み込みサイズを確実にセットして実行
   UINTN read_size = kernel_file_size;
@@ -196,7 +204,6 @@ EFI_STATUS EFIAPI UefiMain(
   //   // もし上のほうで frame_buffer を定義していなければ、((UINT8*)fb_base)[i] と書くのが確実です
   //   ((UINT8*)fb_base)[i] = 255; 
   // }
-
 
   entry_point(fb_base, fb_size);
   // #@@range_end(call_kernel)
