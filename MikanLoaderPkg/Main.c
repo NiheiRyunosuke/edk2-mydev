@@ -169,7 +169,7 @@ EFI_STATUS EFIAPI UefiMain(
 
   // #@@range_begin(call_kernel)
   UINT64 entry_addr = *(UINT64*)(kernel_base_addr + 24);
-  typedef void EntryPointType(UINT64, UINT64); // 型定義をここで済ませる
+  typedef void EntryPointType(const struct FrameBufferConfig*); // 構造体を受け取る形に変更
   EntryPointType* entry_point = (EntryPointType*)entry_addr;
   Print(L"Junmping to Kenel at: 0x%lx\n", entry_addr);
 
