@@ -171,21 +171,37 @@ EFI_STATUS EFIAPI UefiMain(
   UINT64 entry_addr = *(UINT64*)(kernel_base_addr + 24);
   typedef void EntryPointType(const struct FrameBufferConfig*); // 構造体を受け取る形に変更
   EntryPointType* entry_point = (EntryPointType*)entry_addr;
-  Print(L"Junmping to Kenel at: 0x%lx\n", entry_addr);
+  Print(L"Jumping to Kernel at: 0x%lx\n", entry_addr);
 
   EFI_GRAPHICS_OUTPUT_PROTOCOL* gop;
   gBS->LocateProtocol(&gEfiGraphicsOutputProtocolGuid, NULL, (VOID**)&gop);
   // UINT8* frame_buffer = (UINT8*)gop->Mode->FrameBufferBase;
 
-  // 6. ★ 運命の ExitBootServices 実行
-  // 直前に最新のメモリマップを取得するのが成功の秘訣です
-  UINT64 fb_base = gop->Mode->FrameBufferBase;
-  UINT64 fb_size = gop->Mode->FrameBufferSize;
+  // 6. 
+  struct FrameBufferConfig config =  {
+    (UINT8*)gop->Mode->FrameBufferBase,  /* data */
+    gop->Mode->Info->PixelsPerScanLine,
+    gop->Mode->Info->HorizontalResolution,
+    gop->Mode->Info->VerticalResolution,
+    0
+  };
+  switch (gop->Mode->Info->PixelFormat) {
+    case PixelRedGreenBlueReserved8BitPerColor:
+      config.pixel_format = kPixelRGBResv8BitPerColor;
+      break;
+    case PixelBlueGreenRedReserved8BitPerColor:
+      config.pixel_format = kPixelBGRResv8BitPerColor;
+      break;
+    default:
+      Print(L"Unimplemented pixel format: %d\n", gop->Mode->Info->PixelFormat);
+      Halt();
+  }
+  
 
   status = GetMemoryMap(&memmap);
   if (EFI_ERROR(status)) {
     Print(L"failed to get memory map: %r\n", status);
-    while (1);
+    Halt();
   }
 
   status = gBS->ExitBootServices(image_handle, memmap.map_key);
@@ -194,19 +210,12 @@ EFI_STATUS EFIAPI UefiMain(
     GetMemoryMap(&memmap);
     status = gBS->ExitBootServices(image_handle, memmap.map_key);
     if (EFI_ERROR(status)) {
-      Print(L"Could not exit boot service: %r\n", status);
-      while (1);
+      Print(L"failed to get memory map: %r\n", status);
+      Halt();
     }
   }
 
-  // --- これより下は Print や ReadKeyStroke 等の UEFI 関数は使用禁止 ---
-  // 7. 白塗り (直接ビデオメモリを操作) 
-  // for (UINTN i = 0; i < fb_size; ++i) {
-  //   // もし上のほうで frame_buffer を定義していなければ、((UINT8*)fb_base)[i] と書くのが確実です
-  //   ((UINT8*)fb_base)[i] = 255; 
-  // }
-
-  entry_point(fb_base, fb_size);
+  entry_point(&config);
   // #@@range_end(call_kernel)
 
   // Print(L"All done\n");
