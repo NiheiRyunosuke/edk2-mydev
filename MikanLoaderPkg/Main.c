@@ -169,7 +169,7 @@ EFI_STATUS EFIAPI UefiMain(
 
   // #@@range_begin(call_kernel)
   UINT64 entry_addr = *(UINT64*)(kernel_base_addr + 24);
-  typedef void EntryPointType(const struct FrameBufferConfig*); // 構造体を受け取る形に変更
+  typedef void EntryPointType(const struct FrameBufferConfig*); // const struct FrameBufferConfig* を1つ受け取って、void を返す関数の型を EntryPointType と呼ぶことにする
   EntryPointType* entry_point = (EntryPointType*)entry_addr;
   Print(L"Jumping to Kernel at: 0x%lx\n", entry_addr);
 
@@ -210,7 +210,7 @@ EFI_STATUS EFIAPI UefiMain(
     GetMemoryMap(&memmap);
     status = gBS->ExitBootServices(image_handle, memmap.map_key);
     if (EFI_ERROR(status)) {
-      Print(L"failed to get memory map: %r\n", status);
+      Print(L"Could not exit boot service: %r\n", status);
       Halt();
     }
   }
