@@ -9,6 +9,7 @@
 #include  <Protocol/BlockIo.h>
 #include  <Guid/FileInfo.h>
 #include  "frame_buffer_config.hpp"
+#include  "elf.hpp"
 
 struct MemoryMap {
   UINTN buffer_size;
@@ -148,91 +149,91 @@ typedef struct {
 #define PT_LOAD 1
 
 
-static EFI_STATUS ReadFile(
-    EFI_FILE_PROTOCOL* file, UINT64 offset, UINTN size, VOID* buffer) {
-  EFI_STATUS status = file->SetPosition(file, offset);
-  if (EFI_ERROR(status)) {
-    return status;
-  }
-  UINTN read_size = size;
-  return file->Read(file, &read_size, buffer);
-}
+// static EFI_STATUS ReadFile(
+//     EFI_FILE_PROTOCOL* file, UINT64 offset, UINTN size, VOID* buffer) {
+//   EFI_STATUS status = file->SetPosition(file, offset);
+//   if (EFI_ERROR(status)) {
+//     return status;
+//   }
+//   UINTN read_size = size;
+//   return file->Read(file, &read_size, buffer);
+// }
 
-static EFI_STATUS LoadKernelELF(
-    EFI_FILE_PROTOCOL* kernel_file, UINT64* entry_addr) {
-  EFI_STATUS status;
+// static EFI_STATUS LoadKernelELF(
+//     EFI_FILE_PROTOCOL* kernel_file, UINT64* entry_addr) {
+//   EFI_STATUS status;
 
-  Elf64_Ehdr ehdr;
-  status = ReadFile(kernel_file, 0, sizeof(ehdr), &ehdr);
-  if (EFI_ERROR(status)) {
-    Print(L"Failed to read ELF header: %r\n", status);
-    return status;
-  }
+//   Elf64_Ehdr ehdr;
+//   status = ReadFile(kernel_file, 0, sizeof(ehdr), &ehdr);
+//   if (EFI_ERROR(status)) {
+//     Print(L"Failed to read ELF header: %r\n", status);
+//     return status;
+//   }
 
-  if (!(ehdr.e_ident[0] == 0x7f &&
-        ehdr.e_ident[1] == 'E' &&
-        ehdr.e_ident[2] == 'L' &&
-        ehdr.e_ident[3] == 'F')) {
-    Print(L"Kernel file is not ELF\n");
-    return EFI_LOAD_ERROR;
-  }
+//   if (!(ehdr.e_ident[0] == 0x7f &&
+//         ehdr.e_ident[1] == 'E' &&
+//         ehdr.e_ident[2] == 'L' &&
+//         ehdr.e_ident[3] == 'F')) {
+//     Print(L"Kernel file is not ELF\n");
+//     return EFI_LOAD_ERROR;
+//   }
 
-  if (ehdr.e_phentsize != sizeof(Elf64_Phdr)) {
-    Print(L"Unexpected program header size: %u\n", ehdr.e_phentsize);
-    return EFI_LOAD_ERROR;
-  }
+//   if (ehdr.e_phentsize != sizeof(Elf64_Phdr)) {
+//     Print(L"Unexpected program header size: %u\n", ehdr.e_phentsize);
+//     return EFI_LOAD_ERROR;
+//   }
 
-  Elf64_Phdr phdrs[16];
-  if (ehdr.e_phnum > 16) {
-    Print(L"Too many program headers: %u\n", ehdr.e_phnum);
-    return EFI_LOAD_ERROR;
-  }
+//   Elf64_Phdr phdrs[16];
+//   if (ehdr.e_phnum > 16) {
+//     Print(L"Too many program headers: %u\n", ehdr.e_phnum);
+//     return EFI_LOAD_ERROR;
+//   }
 
-  status = ReadFile(
-      kernel_file, ehdr.e_phoff,
-      ehdr.e_phnum * sizeof(Elf64_Phdr), phdrs);
-  if (EFI_ERROR(status)) {
-    Print(L"Failed to read program headers: %r\n", status);
-    return status;
-  }
+//   status = ReadFile(
+//       kernel_file, ehdr.e_phoff,
+//       ehdr.e_phnum * sizeof(Elf64_Phdr), phdrs);
+//   if (EFI_ERROR(status)) {
+//     Print(L"Failed to read program headers: %r\n", status);
+//     return status;
+//   }
 
-  for (UINTN i = 0; i < ehdr.e_phnum; ++i) {
-    if (phdrs[i].p_type != PT_LOAD) {
-      continue;
-    }
+//   for (UINTN i = 0; i < ehdr.e_phnum; ++i) {
+//     if (phdrs[i].p_type != PT_LOAD) {
+//       continue;
+//     }
 
-    UINT64 segm_first = phdrs[i].p_vaddr & 0xfffffffffffff000ULL;
-    UINT64 segm_last  = (phdrs[i].p_vaddr + phdrs[i].p_memsz + 0xfff) &
-                        0xfffffffffffff000ULL;
-    UINTN num_pages = (segm_last - segm_first) / 0x1000;
+//     UINT64 segm_first = phdrs[i].p_vaddr & 0xfffffffffffff000ULL;
+//     UINT64 segm_last  = (phdrs[i].p_vaddr + phdrs[i].p_memsz + 0xfff) &
+//                         0xfffffffffffff000ULL;
+//     UINTN num_pages = (segm_last - segm_first) / 0x1000;
 
-    EFI_PHYSICAL_ADDRESS alloc_addr = segm_first;
-    status = gBS->AllocatePages(
-        AllocateAddress, EfiLoaderData, num_pages, &alloc_addr);
-    if (EFI_ERROR(status)) {
-      Print(L"Failed to allocate pages for segment %u: %r\n", i, status);
-      return status;
-    }
+//     EFI_PHYSICAL_ADDRESS alloc_addr = segm_first;
+//     status = gBS->AllocatePages(
+//         AllocateAddress, EfiLoaderData, num_pages, &alloc_addr);
+//     if (EFI_ERROR(status)) {
+//       Print(L"Failed to allocate pages for segment %u: %r\n", i, status);
+//       return status;
+//     }
 
-    SetMem((VOID*)segm_first, num_pages * 0x1000, 0);
+//     SetMem((VOID*)segm_first, num_pages * 0x1000, 0);
 
-    status = ReadFile(
-        kernel_file, phdrs[i].p_offset,
-        (UINTN)phdrs[i].p_filesz, (VOID*)phdrs[i].p_vaddr);
-    if (EFI_ERROR(status)) {
-      Print(L"Failed to read segment %u: %r\n", i, status);
-      return status;
-    }
+//     status = ReadFile(
+//         kernel_file, phdrs[i].p_offset,
+//         (UINTN)phdrs[i].p_filesz, (VOID*)phdrs[i].p_vaddr);
+//     if (EFI_ERROR(status)) {
+//       Print(L"Failed to read segment %u: %r\n", i, status);
+//       return status;
+//     }
 
-    Print(
-        L"Loaded segment %u: offset=0x%lx vaddr=0x%lx filesz=0x%lx memsz=0x%lx\n",
-        i, phdrs[i].p_offset, phdrs[i].p_vaddr,
-        phdrs[i].p_filesz, phdrs[i].p_memsz);
-  }
+//     Print(
+//         L"Loaded segment %u: offset=0x%lx vaddr=0x%lx filesz=0x%lx memsz=0x%lx\n",
+//         i, phdrs[i].p_offset, phdrs[i].p_vaddr,
+//         phdrs[i].p_filesz, phdrs[i].p_memsz);
+//   }
 
-  *entry_addr = ehdr.e_entry;
-  return EFI_SUCCESS;
-}
+//   *entry_addr = ehdr.e_entry;
+//   return EFI_SUCCESS;
+// }
 
 
 
@@ -260,44 +261,44 @@ void CopyLoadSegments(Elf64_Ehdr* ehdr) {
   }
 }
 
-UINT64 entry_addr = *(UINT64*)(kernel_first_addr + 24);
+// UINT64 entry_addr = *(UINT64*)(kernel_first_addr + 24);
 
-CopyLoadSegments(kernel_ehdr);
-Print(L"Kernel: 0x%0lx - 0x%0lx\n", kernel_first_addr, kernel_last_addr);
+// CopyLoadSegments(kernel_ehdr);
+// Print(L"Kernel: 0x%0lx - 0x%0lx\n", kernel_first_addr, kernel_last_addr);
 
-status = gBS->FreePool(kernel_buffer);
-if (EFI_ERROR(status)){
-  Print(L"failed to free pool: %r\n", status);
-  Halt();
-}
-
-
-EFI_FILE_INFO* file_info = (EFI_FILE_INFO*)file_info_buffer;
-UINTN kernel_file_size = file_info->FileSize;
-
-VOID* kernel_buffer;
-status = gBS->AllocatePool(EfiLoaderData, kernel_file_size, &kernel_buffer);
-if (EFI_ERROR(status)) {
-  Print(L"failed to allocate pool: %r\n", status);
-  Halt();
-}
-status = kernel_file->Read(kernel_file, &kernel_file_size, kernel_buffer);
-if (EFI_ERROR(status)) {
-  Print(L"error: %r", status);
-  Halt();
-}
+// status = gBS->FreePool(kernel_buffer);
+// if (EFI_ERROR(status)){
+//   Print(L"failed to free pool: %r\n", status);
+//   Halt();
+// }
 
 
-Elf64_Ehdr* kernel_ehdr = (Elf64_Ehdr*)kernel_buffer;
-UINT64 kernel_first_addr, kernel_last_addr;
-CalcLoadAddressRange(kernel_ehdr, &kernel_first_addr, &kernel_last_addr);
+// EFI_FILE_INFO* file_info = (EFI_FILE_INFO*)file_info_buffer;
+// UINTN kernel_file_size = file_info->FileSize;
 
-UINTN num_pages = (kernel_last_addr - kernel_first_addr + 0xfff) / 0x1000;
-status = gBS ->AllocatePages(AllocateAddress, EfiLoaderData, num_pages, &kernel_first_addr);
-if (EFI_ERROR(status)) {
-  Print(L"failed to allocate pages: %r\n", status);
-  Halt();
-}
+// VOID* kernel_buffer;
+// status = gBS->AllocatePool(EfiLoaderData, kernel_file_size, &kernel_buffer);
+// if (EFI_ERROR(status)) {
+//   Print(L"failed to allocate pool: %r\n", status);
+//   Halt();
+// }
+// status = kernel_file->Read(kernel_file, &kernel_file_size, kernel_buffer);
+// if (EFI_ERROR(status)) {
+//   Print(L"error: %r", status);
+//   Halt();
+// }
+
+
+// Elf64_Ehdr* kernel_ehdr = (Elf64_Ehdr*)kernel_buffer;
+// UINT64 kernel_first_addr, kernel_last_addr;
+// CalcLoadAddressRange(kernel_ehdr, &kernel_first_addr, &kernel_last_addr);
+
+// UINTN num_pages = (kernel_last_addr - kernel_first_addr + 0xfff) / 0x1000;
+// status = gBS ->AllocatePages(AllocateAddress, EfiLoaderData, num_pages, &kernel_first_addr);
+// if (EFI_ERROR(status)) {
+//   Print(L"failed to allocate pages: %r\n", status);
+//   Halt();
+// }
 
 
 EFI_STATUS EFIAPI UefiMain(
@@ -328,12 +329,55 @@ EFI_STATUS EFIAPI UefiMain(
     Halt();
   }
 
-  UINT64 entry_addr;
-  status = LoadKernelELF(kernel_file, &entry_addr);
+  UINTN file_info_size = sizeof(EFI_FILE_INFO) + sizeof(CHAR16) * 12;
+  UINT8 file_info_buffer[file_info_size];
+  status = kernel_file->GetInfo(
+      kernel_file, &gEfiFileInfoGuid,
+      &file_info_size, file_info_buffer);
   if (EFI_ERROR(status)) {
-    Print(L"Failed to load kernel ELF: %r\n", status);
+    Print(L"failed to get kernel file info: %r\n", status);
     Halt();
   }
+
+  EFI_FILE_INFO* file_info = (EFI_FILE_INFO*)file_info_buffer;
+  UINTN kernel_file_size = file_info->FileSize;
+
+  VOID* kernel_buffer;
+  status = gBS->AllocatePool(EfiLoaderData, kernel_file_size, &kernel_buffer);
+  if (EFI_ERROR(status)) {
+    Print(L"failed to allocate pool: %r\n", status);
+    Halt();
+  }
+
+  status = kernel_file->Read(kernel_file, &kernel_file_size, kernel_buffer);
+  if (EFI_ERROR(status)) {
+    Print(L"error: %r\n", status);
+    Halt();
+  }
+
+  Elf64_Ehdr* kernel_ehdr = (Elf64_Ehdr*)kernel_buffer;
+  UINT64 kernel_first_addr, kernel_last_addr;
+  CalcLoadAddressRange(kernel_ehdr, &kernel_first_addr, &kernel_last_addr);
+
+  UINTN num_pages = (kernel_last_addr - kernel_first_addr + 0xfff) / 0x1000;
+  status = gBS->AllocatePages(
+      AllocateAddress, EfiLoaderData, num_pages, &kernel_first_addr);
+  if (EFI_ERROR(status)) {
+    Print(L"failed to allocate pages: %r\n", status);
+    Halt();
+  }
+
+  CopyLoadSegments(kernel_ehdr);
+  Print(L"Kernel: 0x%0lx - 0x%0lx\n", kernel_first_addr, kernel_last_addr);
+
+  UINT64 entry_addr = *(UINT64*)(kernel_first_addr + 24);
+
+  status = gBS->FreePool(kernel_buffer);
+  if (EFI_ERROR(status)) {
+    Print(L"failed to free pool: %r\n", status);
+    Halt();
+  }
+
   kernel_file->Close(kernel_file);
 
   typedef void __attribute__((ms_abi)) EntryPointType(
@@ -375,7 +419,7 @@ EFI_STATUS EFIAPI UefiMain(
     Halt();
   }
 
-  
+
   status = gBS->ExitBootServices(image_handle, memmap.map_key);
   if (EFI_ERROR(status)) {
     status = GetMemoryMap(&memmap);
