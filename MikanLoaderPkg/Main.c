@@ -375,6 +375,7 @@ EFI_STATUS EFIAPI UefiMain(
     Halt();
   }
 
+  
   status = gBS->ExitBootServices(image_handle, memmap.map_key);
   if (EFI_ERROR(status)) {
     status = GetMemoryMap(&memmap);
