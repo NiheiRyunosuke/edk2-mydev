@@ -260,6 +260,8 @@ void CopyLoadSegments(Elf64_Ehdr* ehdr) {
   }
 }
 
+UINT64 entry_addr = *(UINT64*)(kernel_first_addr + 24);
+
 CopyLoadSegments(kernel_ehdr);
 Print(L"Kernel: 0x%0lx - 0x%0lx\n", kernel_first_addr, kernel_last_addr);
 
