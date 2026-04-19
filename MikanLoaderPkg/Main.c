@@ -2,6 +2,7 @@
 #include  <Library/UefiLib.h>
 #include  <Library/UefiBootServicesTableLib.h>
 #include  <Library/PrintLib.h>
+#include  <Library/BaseMemoryLib.h>
 #include  <Protocol/LoadedImage.h>
 #include  <Protocol/SimpleFileSystem.h>
 #include  <Protocol/DiskIo2.h>
@@ -109,82 +110,240 @@ EFI_STATUS OpenRootDir(EFI_HANDLE image_handle, EFI_FILE_PROTOCOL** root) {
   return EFI_SUCCESS;
 }
 
-void Halt(void){
+void Halt(void) {
   while (1) __asm__("hlt");
 }
+
+/* -------------------------
+ * Minimal ELF64 definitions
+ * ------------------------- */
+typedef struct {
+  unsigned char e_ident[16];
+  UINT16 e_type;
+  UINT16 e_machine;
+  UINT32 e_version;
+  UINT64 e_entry;
+  UINT64 e_phoff;
+  UINT64 e_shoff;
+  UINT32 e_flags;
+  UINT16 e_ehsize;
+  UINT16 e_phentsize;
+  UINT16 e_phnum;
+  UINT16 e_shentsize;
+  UINT16 e_shnum;
+  UINT16 e_shstrndx;
+} Elf64_Ehdr;
+
+typedef struct {
+  UINT32 p_type;
+  UINT32 p_flags;
+  UINT64 p_offset;
+  UINT64 p_vaddr;
+  UINT64 p_paddr;
+  UINT64 p_filesz;
+  UINT64 p_memsz;
+  UINT64 p_align;
+} Elf64_Phdr;
+
+#define PT_LOAD 1
+
+
+static EFI_STATUS ReadFile(
+    EFI_FILE_PROTOCOL* file, UINT64 offset, UINTN size, VOID* buffer) {
+  EFI_STATUS status = file->SetPosition(file, offset);
+  if (EFI_ERROR(status)) {
+    return status;
+  }
+  UINTN read_size = size;
+  return file->Read(file, &read_size, buffer);
+}
+
+static EFI_STATUS LoadKernelELF(
+    EFI_FILE_PROTOCOL* kernel_file, UINT64* entry_addr) {
+  EFI_STATUS status;
+
+  Elf64_Ehdr ehdr;
+  status = ReadFile(kernel_file, 0, sizeof(ehdr), &ehdr);
+  if (EFI_ERROR(status)) {
+    Print(L"Failed to read ELF header: %r\n", status);
+    return status;
+  }
+
+  if (!(ehdr.e_ident[0] == 0x7f &&
+        ehdr.e_ident[1] == 'E' &&
+        ehdr.e_ident[2] == 'L' &&
+        ehdr.e_ident[3] == 'F')) {
+    Print(L"Kernel file is not ELF\n");
+    return EFI_LOAD_ERROR;
+  }
+
+  if (ehdr.e_phentsize != sizeof(Elf64_Phdr)) {
+    Print(L"Unexpected program header size: %u\n", ehdr.e_phentsize);
+    return EFI_LOAD_ERROR;
+  }
+
+  Elf64_Phdr phdrs[16];
+  if (ehdr.e_phnum > 16) {
+    Print(L"Too many program headers: %u\n", ehdr.e_phnum);
+    return EFI_LOAD_ERROR;
+  }
+
+  status = ReadFile(
+      kernel_file, ehdr.e_phoff,
+      ehdr.e_phnum * sizeof(Elf64_Phdr), phdrs);
+  if (EFI_ERROR(status)) {
+    Print(L"Failed to read program headers: %r\n", status);
+    return status;
+  }
+
+  for (UINTN i = 0; i < ehdr.e_phnum; ++i) {
+    if (phdrs[i].p_type != PT_LOAD) {
+      continue;
+    }
+
+    UINT64 segm_first = phdrs[i].p_vaddr & 0xfffffffffffff000ULL;
+    UINT64 segm_last  = (phdrs[i].p_vaddr + phdrs[i].p_memsz + 0xfff) &
+                        0xfffffffffffff000ULL;
+    UINTN num_pages = (segm_last - segm_first) / 0x1000;
+
+    EFI_PHYSICAL_ADDRESS alloc_addr = segm_first;
+    status = gBS->AllocatePages(
+        AllocateAddress, EfiLoaderData, num_pages, &alloc_addr);
+    if (EFI_ERROR(status)) {
+      Print(L"Failed to allocate pages for segment %u: %r\n", i, status);
+      return status;
+    }
+
+    SetMem((VOID*)segm_first, num_pages * 0x1000, 0);
+
+    status = ReadFile(
+        kernel_file, phdrs[i].p_offset,
+        (UINTN)phdrs[i].p_filesz, (VOID*)phdrs[i].p_vaddr);
+    if (EFI_ERROR(status)) {
+      Print(L"Failed to read segment %u: %r\n", i, status);
+      return status;
+    }
+
+    Print(
+        L"Loaded segment %u: offset=0x%lx vaddr=0x%lx filesz=0x%lx memsz=0x%lx\n",
+        i, phdrs[i].p_offset, phdrs[i].p_vaddr,
+        phdrs[i].p_filesz, phdrs[i].p_memsz);
+  }
+
+  *entry_addr = ehdr.e_entry;
+  return EFI_SUCCESS;
+}
+
+
+
+void CalcLoadAddressRange(Elf64_Ehdr* ehdr, UINT64* first, UINT64* last) {
+  Elf64_Phdr* phdr = (Elf64_Phdr*)((UINT64)ehdr + ehdr->e_phoff);
+  *first = MAX_UINT64;
+  *last = 0;
+  for (Elf64_Half i = 0; i < ehdr->e_phnum; ++i) {
+    if (phdr[i].p_type != PT_LOAD) continue;
+    *first = MIN(*first, phdr[i].p_vaddr);
+    *last = MAX(*last, phdr[i].p_vaddr + phdr[i].p_memsz);
+  }
+}
+
+
+
+CopyLoadSegments(kernel_ehdr);
+Print(L"Kernel: 0x%0lx - 0x%0lx\n", kernel_first_addr, kernel_last_addr);
+
+status = gBS->FreePool(kernel_buffer);
+if (EFI_ERROR(status)){
+  Print(L"failed to free pool: %r\n", status);
+  Halt();
+}
+
+
+EFI_FILE_INFO* file_info = (EFI_FILE_INFO*)file_info_buffer;
+UINTN kernel_file_size = file_info->FileSize;
+
+VOID* kernel_buffer;
+status = gBS->AllocatePool(EfiLoaderData, kernel_file_size, &kernel_buffer);
+if (EFI_ERROR(status)) {
+  Print(L"failed to allocate pool: %r\n", status);
+  Halt();
+}
+status = kernel_file->Read(kernel_file, &kernel_file_size, kernel_buffer);
+if (EFI_ERROR(status)) {
+  Print(L"error: %r", status);
+  Halt();
+}
+
+
+Elf64_Ehdr* kernel_ehdr = (Elf64_Ehdr*)kernel_buffer;
+UINT64 kernel_first_addr, kernel_last_addr;
+CalcLoadAddressRange(kernel_ehdr, &kernel_first_addr, &kernel_last_addr);
+
+UINTN num_pages = (kernel_last_addr - kernel_first_addr + 0xfff) / 0x1000;
+status = gBS ->AllocatePages(AllocateAddress, EfiLoaderData, num_pages, &kernel_first_addr);
+if (EFI_ERROR(status)) {
+  Print(L"failed to allocate pages: %r\n", status);
+  Halt();
+}
+
 
 EFI_STATUS EFIAPI UefiMain(
     EFI_HANDLE image_handle,
     EFI_SYSTEM_TABLE* system_table) {
   Print(L"Hello, Mikan World!\n");
 
-  // 1. メモリマップ用バッファを確保
-  // CHAR8 memmap_buf[4096 * 4];
   CHAR8 memmap_buf[4096 * 8];
   struct MemoryMap memmap = {sizeof(memmap_buf), memmap_buf, 0, 0, 0, 0};
-  EFI_STATUS status; // ★これが必要！
-  status = GetMemoryMap(&memmap);
+  EFI_STATUS status = GetMemoryMap(&memmap);
 
-  // 2. ルートディレクトリと画面(GOP)の準備を先に済ませる
   EFI_FILE_PROTOCOL* root_dir;
   OpenRootDir(image_handle, &root_dir);
 
-  // 3. メモリマップをファイルに保存
   EFI_FILE_PROTOCOL* memmap_file;
   root_dir->Open(
       root_dir, &memmap_file, L"\\memmap",
       EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE | EFI_FILE_MODE_CREATE, 0);
-
   SaveMemoryMap(&memmap, memmap_file);
   memmap_file->Close(memmap_file);
 
-  // #@@range_begin(read_kernel)
   EFI_FILE_PROTOCOL* kernel_file;
-  root_dir->Open(
+  status = root_dir->Open(
       root_dir, &kernel_file, L"\\kernel.elf",
       EFI_FILE_MODE_READ, 0);
-
-  UINTN file_info_size = sizeof(EFI_FILE_INFO) + sizeof(CHAR16) * 12;
-  UINT8 file_info_buffer[file_info_size];
-  kernel_file->GetInfo(
-      kernel_file, &gEfiFileInfoGuid,
-      &file_info_size, file_info_buffer);
-
-  EFI_FILE_INFO* file_info = (EFI_FILE_INFO*)file_info_buffer;
-  UINTN kernel_file_size = file_info->FileSize;
-
-  EFI_PHYSICAL_ADDRESS kernel_base_addr = 0x100000;
-  status = gBS->AllocatePages(
-      AllocateAddress, EfiLoaderData,
-      (kernel_file_size + 0xfff) / 0x1000, &kernel_base_addr);
-  if (EFI_ERROR(status)){
-    Print(L"failed to allocate pages: %r\n", status);
+  if (EFI_ERROR(status)) {
+    Print(L"Could not open kernel.elf: %r\n", status);
     Halt();
   }
 
-  // ★修正ポイント：読み込みサイズを確実にセットして実行
-  UINTN read_size = kernel_file_size;
-  status = kernel_file->Read(kernel_file, &read_size, (VOID*)kernel_base_addr);
-  Print(L"Kernel: 0x%0lx (%lu / %lu bytes read)\n", kernel_base_addr, read_size, kernel_file_size);
+  UINT64 entry_addr;
+  status = LoadKernelELF(kernel_file, &entry_addr);
+  if (EFI_ERROR(status)) {
+    Print(L"Failed to load kernel ELF: %r\n", status);
+    Halt();
+  }
+  kernel_file->Close(kernel_file);
 
-  // #@@range_begin(call_kernel)
-  UINT64 entry_addr = *(UINT64*)(kernel_base_addr + 24);
-  typedef void EntryPointType(const struct FrameBufferConfig*); // const struct FrameBufferConfig* を1つ受け取って、void を返す関数の型を EntryPointType と呼ぶことにする
+  typedef void __attribute__((ms_abi)) EntryPointType(
+      const struct FrameBufferConfig*);
   EntryPointType* entry_point = (EntryPointType*)entry_addr;
   Print(L"Jumping to Kernel at: 0x%lx\n", entry_addr);
 
   EFI_GRAPHICS_OUTPUT_PROTOCOL* gop;
-  gBS->LocateProtocol(&gEfiGraphicsOutputProtocolGuid, NULL, (VOID**)&gop);
-  // UINT8* frame_buffer = (UINT8*)gop->Mode->FrameBufferBase;
+  status = gBS->LocateProtocol(
+      &gEfiGraphicsOutputProtocolGuid, NULL, (VOID**)&gop);
+  if (EFI_ERROR(status)) {
+    Print(L"Failed to locate GOP: %r\n", status);
+    Halt();
+  }
 
-  // 6. 
-  struct FrameBufferConfig config =  {
-    (UINT8*)gop->Mode->FrameBufferBase,  /* data */
+  struct FrameBufferConfig config = {
+    (UINT8*)gop->Mode->FrameBufferBase,
     gop->Mode->Info->PixelsPerScanLine,
     gop->Mode->Info->HorizontalResolution,
     gop->Mode->Info->VerticalResolution,
     0
   };
+
   switch (gop->Mode->Info->PixelFormat) {
     case PixelRedGreenBlueReserved8BitPerColor:
       config.pixel_format = kPixelRGBResv8BitPerColor;
@@ -196,7 +355,6 @@ EFI_STATUS EFIAPI UefiMain(
       Print(L"Unimplemented pixel format: %d\n", gop->Mode->Info->PixelFormat);
       Halt();
   }
-  
 
   status = GetMemoryMap(&memmap);
   if (EFI_ERROR(status)) {
@@ -206,8 +364,12 @@ EFI_STATUS EFIAPI UefiMain(
 
   status = gBS->ExitBootServices(image_handle, memmap.map_key);
   if (EFI_ERROR(status)) {
-    // 失敗した場合はマップを取り直してリトライ (UEFIの仕様で推奨されています)
-    GetMemoryMap(&memmap);
+    status = GetMemoryMap(&memmap);
+    if (EFI_ERROR(status)) {
+      Print(L"failed to get memory map for retry: %r\n", status);
+      Halt();
+    }
+
     status = gBS->ExitBootServices(image_handle, memmap.map_key);
     if (EFI_ERROR(status)) {
       Print(L"Could not exit boot service: %r\n", status);
@@ -216,9 +378,6 @@ EFI_STATUS EFIAPI UefiMain(
   }
 
   entry_point(&config);
-  // #@@range_end(call_kernel)
-
-  // Print(L"All done\n");
 
   while (1);
   return EFI_SUCCESS;
