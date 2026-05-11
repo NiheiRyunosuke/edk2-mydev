@@ -1,4 +1,15 @@
+#pragma once
+#include <stdint.h>
+
+using Elf64_Addr  = uint64_t;
+using Elf64_Off   = uint64_t;
+using Elf64_Half  = uint16_t;
+using Elf64_Word  = uint32_t;
+using Elf64_Xword = uint64_t;
+
 #define EI_NIDENT 16
+#define PT_LOAD 1
+
 
 typedef struct {
     unsigned char e_ident[EI_NIDENT];
