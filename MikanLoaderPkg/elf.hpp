@@ -22,6 +22,8 @@ typedef struct {
     Elf64_Word    e_flags;
     Elf64_Half    e_ehsize;
     Elf64_Half    e_phentsize;
+    Elf64_Half    e_phnum;
+    Elf64_Half    e_shentsize;
     Elf64_Half    e_shnum;
     Elf64_Half    e_shstrndx;
 }   Elf64_Ehdr;
