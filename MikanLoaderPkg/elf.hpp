@@ -1,11 +1,11 @@
 #pragma once
 #include <stdint.h>
 
-using Elf64_Addr  = uint64_t;
-using Elf64_Off   = uint64_t;
-using Elf64_Half  = uint16_t;
-using Elf64_Word  = uint32_t;
-using Elf64_Xword = uint64_t;
+typedef uint64_t Elf64_Addr;
+typedef uint64_t Elf64_Off;
+typedef uint16_t Elf64_Half;
+typedef uint32_t Elf64_Word;
+typedef uint64_t Elf64_Xword;
 
 #define EI_NIDENT 16
 #define PT_LOAD 1
