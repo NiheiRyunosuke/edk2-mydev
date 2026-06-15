@@ -86,6 +86,11 @@ EFI_STATUS SaveMemoryMap(struct MemoryMap* map, EFI_FILE_PROTOCOL* file) {
   return EFI_SUCCESS;
 }
 
+typedef void EntryPointType(const struct FrameBufferConfig*,
+                            const struct MemoryMap*);
+EntryPointType* entry_point = (EntryPointType*)entry_addr;
+entry_point(&config, &memmap);
+
 EFI_STATUS OpenRootDir(EFI_HANDLE image_handle, EFI_FILE_PROTOCOL** root) {
   EFI_LOADED_IMAGE_PROTOCOL* loaded_image;
   EFI_SIMPLE_FILE_SYSTEM_PROTOCOL* fs;
