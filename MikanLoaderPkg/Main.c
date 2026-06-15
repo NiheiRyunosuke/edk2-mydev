@@ -12,15 +12,6 @@
 #include  "elf.hpp"
 #include "memory_map.hpp"
 
-struct MemoryMap {
-  UINTN buffer_size;
-  VOID* buffer;
-  UINTN map_size;
-  UINTN map_key;
-  UINTN descriptor_size;
-  UINT32 descriptor_version;
-};
-
 EFI_STATUS GetMemoryMap(struct MemoryMap* map) {
   if (map->buffer == NULL) {
     return EFI_BUFFER_TOO_SMALL;
@@ -58,6 +49,7 @@ const CHAR16* GetMemoryTypeUnicode(EFI_MEMORY_TYPE type) {
 }
 
 EFI_STATUS SaveMemoryMap(struct MemoryMap* map, EFI_FILE_PROTOCOL* file) {
+  EFI_STATUS status;
   CHAR8 buf[256];
   UINTN len;
 
@@ -86,11 +78,6 @@ EFI_STATUS SaveMemoryMap(struct MemoryMap* map, EFI_FILE_PROTOCOL* file) {
 
   return EFI_SUCCESS;
 }
-
-typedef void EntryPointType(const struct FrameBufferConfig*,
-                            const struct MemoryMap*);
-EntryPointType* entry_point = (EntryPointType*)entry_addr;
-entry_point(&config, &memmap);
 
 EFI_STATUS OpenRootDir(EFI_HANDLE image_handle, EFI_FILE_PROTOCOL** root) {
   EFI_LOADED_IMAGE_PROTOCOL* loaded_image;
@@ -225,11 +212,6 @@ EFI_STATUS EFIAPI UefiMain(
 
   kernel_file->Close(kernel_file);
 
-  typedef void __attribute__((ms_abi)) EntryPointType(
-      const struct FrameBufferConfig*);
-  EntryPointType* entry_point = (EntryPointType*)entry_addr;
-  Print(L"Jumping to Kernel at: 0x%lx\n", entry_addr);
-
   EFI_GRAPHICS_OUTPUT_PROTOCOL* gop;
   status = gBS->LocateProtocol(
       &gEfiGraphicsOutputProtocolGuid, NULL, (VOID**)&gop);
@@ -280,7 +262,13 @@ EFI_STATUS EFIAPI UefiMain(
     }
   }
 
-  entry_point(&config);
+  typedef void __attribute__((ms_abi)) EntryPointType(
+              const struct FrameBufferConfig*,
+              const struct MemoryMap*);
+  EntryPointType* entry_point = (EntryPointType*)entry_addr;
+  entry_point(&config, &memmap);
+
+  Print(L"All done\n");
 
   while (1);
   return EFI_SUCCESS;
