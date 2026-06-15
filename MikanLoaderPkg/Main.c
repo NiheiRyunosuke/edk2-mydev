@@ -10,6 +10,7 @@
 #include  <Guid/FileInfo.h>
 #include  "frame_buffer_config.hpp"
 #include  "elf.hpp"
+#include "memory_map.hpp"
 
 struct MemoryMap {
   UINTN buffer_size;
