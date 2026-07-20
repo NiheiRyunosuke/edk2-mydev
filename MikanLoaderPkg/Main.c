@@ -307,15 +307,15 @@ EFI_STATUS EFIAPI UefiMain(
   CopyLoadSegments(kernel_ehdr);
   Print(L"Kernel: 0x%0lx - 0x%0lx\n", kernel_first_addr, kernel_last_addr);
 
-  UINT64 entry_addr = *(UINT64*)(kernel_first_addr + 24);
-
   status = gBS->FreePool(kernel_buffer);
   if (EFI_ERROR(status)) {
     Print(L"failed to free pool: %r\n", status);
     Halt();
   }
 
-  kernel_file->Close(kernel_file);
+  // kernel_file->Close(kernel_file);
+
+  UINT64 entry_addr = *(UINT64*)(kernel_first_addr + 24);
 
   struct FrameBufferConfig config = {
     (UINT8*)gop->Mode->FrameBufferBase,
