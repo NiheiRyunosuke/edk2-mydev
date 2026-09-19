@@ -220,6 +220,26 @@ EFI_STATUS OpenBlockIoProtocolForLoadedImage(
   return status;
 }
 
+EFI_STATUS ReadBlocks(
+    EFI_BLOCK_IO_PROTOCOL* block_io, UINT32 media_id,
+    UINTN read_bytes, VOID** buffer) {
+  EFI_STATUS status;
+  
+  status = gBS->AllocatePool(EfiLoaderData, read_bytes, buffer);
+  if (EFI_ERROR(status)) {
+    return status;
+  }
+
+  status = block_io->ReadBlocks(
+    block_io,
+    media_id,
+    0, // start LBA
+    read_bytes,
+    *buffer);
+  
+  return status;
+}
+
 EFI_STATUS EFIAPI UefiMain(
     EFI_HANDLE image_handle,
     EFI_SYSTEM_TABLE* system_table) {
