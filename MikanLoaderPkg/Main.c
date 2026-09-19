@@ -193,6 +193,32 @@ void CopyLoadSegments(Elf64_Ehdr* ehdr) {
   }
 }
 
+EFI_STATUS OpenBlockIoProtocolForLoadedImage(
+    EFI_HANDLE image_handle, EFI_BLOCK_IO_PROTOCOL** block_io) {
+  EFI_STATUS status;
+  EFI_LOADED_IMAGE_PROTOCOL* loaded_image;
+
+  status = gBS->OpenProtocol(
+    image_handle,
+    &gEfiLoadedImageProtocolGuid,
+    (VOID**)&loaded_image,
+    image_handle,
+    NULL,
+    EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL);
+  if (EFI_ERROR(status)) {
+    return status;
+  }
+
+  status = gBS->OpenProtocol(
+    loaded_image->DeviceHandle,
+    &gEfiBlockIoProtocolGuid,
+    (VOID**)block_io,
+    image_handle, // agent handle
+    NULL,
+    EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL);
+
+  return status;
+}
 
 EFI_STATUS EFIAPI UefiMain(
     EFI_HANDLE image_handle,
