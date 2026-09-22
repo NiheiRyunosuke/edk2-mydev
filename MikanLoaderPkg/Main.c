@@ -359,40 +359,58 @@ EFI_STATUS EFIAPI UefiMain(
     Halt();
   }
 
+  // VOID* volume_image;
+
+  // EFI_FILE_PROTOCOL* volume_file;
+  // status = root_dir->Open(
+  //   root_dir, &volume_file, L"\\fat_disk",
+  //   EFI_FILE_MODE_READ, 0);
+  // if (status == EFI_SUCCESS) {
+  //   status = ReadFile(volume_file, &volume_image);
+  //   if (EFI_ERROR(status)) {
+  //     Print(L"failed to read volume file; %r", status);
+  //     Halt();
+  //   }
+  // } else {
+  //   EFI_BLOCK_IO_PROTOCOL* block_io;
+  //   status = OpenBlockIoProtocolForLoadedImage(image_handle, &block_io);
+  //   if (EFI_ERROR(status)) {
+  //     Print(L"failed to open Block I/O Protocol: %r\n", status);
+  //     Halt();
+  //   }
+
+
   VOID* volume_image;
 
-  EFI_FILE_PROTOCOL* volume_file;
-  status = root_dir->Open(
-    root_dir, &volume_file, L"\\fat_disk",
-    EFI_FILE_MODE_READ, 0);
-  if (status == EFI_SUCCESS) {
-    status = ReadFile(volume_file, &volume_image);
-    if (EFI_ERROR(status)) {
-      Print(L"failed to read volume file; %r", status);
-      Halt();
-    }
-  } else {
-    EFI_BLOCK_IO_PROTOCOL* block_io;
-    status = OpenBlockIoProtocolForLoadedImage(image_handle, &block_io);
-    if (EFI_ERROR(status)) {
-      Print(L"failed to open Block I/O Protocol: %r\n", status);
-      Halt();
-    }
+  EFI_BLOCK_IO_PROTOCOL* block_io;
+  status = OpenBlockIoProtocolForLoadedImage(image_handle, &block_io);
+  if (EFI_ERROR(status)) {
+    Print(L"failed to open Block I/O Protocol: %r\n", status);
+    Halt();
+  }
 
-    EFI_BLOCK_IO_MEDIA* media = block_io->Media;
-    UINTN volume_bytes = (UINTN)media->BlockSize * (media->LastBlock + 1);
-    if (volume_bytes > 16 * 1024 * 1024) {
-      volume_bytes = 16 * 1024 * 1024;
-    }
+  EFI_BLOCK_IO_MEDIA* media = block_io->Media;
+  UINTN volume_bytes = (UINTN)media->BlockSize * (media->LastBlock + 1);
 
-    Print(L"Reading %lu bytes (Present %d, BlockSize %u, LastBlock %u)\n",
-          volume_bytes, media->MediaPresent, media->BlockSize, media->LastBlock);
-    
-    status = ReadBlocks(block_io, media->MediaId, volume_bytes, &volume_image);
-    if (EFI_ERROR(status)) {
-      Print(L"failed to read block: %r\n", status);
-      Halt();
-    }
+  if (volume_bytes > 16 * 1024 * 1024) {
+    volume_bytes = 16 * 1024 * 1024;
+  }
+
+  Print(L"Reading %lu bytes (Present %d, BlockSize %u, LastBlock %u)\n",
+        volume_bytes,
+        media->MediaPresent,
+        media->BlockSize,
+        media->LastBlock);
+
+  status = ReadBlocks(
+      block_io,
+      media->MediaId,
+      volume_bytes,
+      &volume_image);
+
+  if (EFI_ERROR(status)) {
+    Print(L"failed to read block: %r\n", status);
+    Halt();
   }
 
   UINT64 entry_addr = *(UINT64*)(kernel_first_addr + 24);
